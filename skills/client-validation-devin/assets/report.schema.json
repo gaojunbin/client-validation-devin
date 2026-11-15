@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClientValidationDevinReport",
+  "description": "Validation report for one platform and one round. Contract version 1.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "round_token",
+    "report_status",
+    "platform",
+    "commit",
+    "verdict",
+    "summary",
+    "phases",
+    "scenarios",
+    "issues"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "enum": ["1"] },
+    "round_token": { "type": "string", "description": "Copy exactly from the job header." },
+    "report_status": {
+      "type": "string",
+      "enum": ["in_progress", "final"],
+      "description": "Use final only when the round is complete or abandoned."
+    },
+    "platform": { "type": "string", "enum": ["ios", "android", "macos", "linux", "windows", "web"] },
+    "commit": { "type": "string", "description": "Output of git rev-parse HEAD after checkout." },
+    "verdict": { "type": "string", "enum": ["pass", "fail", "blocked"] },
+    "summary": { "type": "string", "description": "Two to five sentences a developer reads first." },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "os": { "type": "string" },
+        "toolchain": { "type": "string" },
+        "devices": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "phases": {
+      "type": "object",
+      "required": ["checkout", "build", "tests", "launch", "scenarios", "layout"],
+      "properties": {
+        "checkout": { "$ref": "#/definitions/phase" },
+        "build": { "$ref": "#/definitions/phase" },
+        "tests": { "$ref": "#/definitions/phase" },
+        "launch": { "$ref": "#/definitions/phase" },
+        "scenarios": { "$ref": "#/definitions/phase" },
+        "layout": { "$ref": "#/definitions/phase" }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "passed": { "type": "integer" },
+        "failed": { "type": "integer" },
+        "skipped": { "type": "integer" },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["pass", "fail", "blocked", "skipped"] },
+          "device": { "type": "string" },
+          "notes": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "issues": { "type": "array", "items": { "$ref": "#/definitions/issue" } },
+    "fixed_issue_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Ids from the previous round verified as fixed in this round."
+    },
+    "blocked_reason": { "type": "string" },
+    "spec_feedback": { "type": "array", "items": { "type": "string" } },
+    "evidence_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Every file name attached to your messages in this round."
+    }
+  },
+  "definitions": {
+    "phase": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "fail", "blocked", "skipped"] },
+        "detail": { "type": "string" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "required": ["id", "severity", "category", "title", "actual", "evidence"],
+      "properties": {
+        "id": { "type": "string", "description": "<platform>-<nnn>; keep the same id for the same issue across rounds." },
+        "severity": { "type": "string", "enum": ["blocker", "critical", "major", "minor", "cosmetic"] },
+        "category": {
+          "type": "string",
+          "enum": [
+            "build",
+            "test",
+            "crash",
+            "hang",
+            "layout",
+            "visual",
+            "logic",
+            "accessibility",
+            "performance",
+            "environment"
+          ]
+        },
+        "title": { "type": "string" },
+        "scenario": { "type": "string" },
+        "screen": { "type": "string" },
+        "device": { "type": "string" },
+        "repro_steps": { "type": "array", "items": { "type": "string" } },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" },
+        "evidence": { "type": "array", "items": { "type": "string" } },
+        "log_excerpt": { "type": "string" },
+        "suspected_location": { "type": "string" },
+        "suggested_fix": { "type": "string" },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+        "status_vs_previous": { "type": "string", "enum": ["new", "still_present", "regressed"] }
+      }
+    }
+  }
+}

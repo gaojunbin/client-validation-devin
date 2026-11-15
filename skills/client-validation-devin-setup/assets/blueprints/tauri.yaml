@@ -1,0 +1,107 @@
+# Devin blueprint template: Tauri v2 desktop app (Rust + web frontend) for Linux, macOS and Windows.
+# Copy to .devin/blueprint.yaml and adjust: Node version, package manager, the src-tauri path, and
+# the binary/bundle names in knowledge. Tauri mobile targets need the Android/iOS tooling from the
+# flutter or react-native templates. Delete the documents for platforms the product does not ship.
+# Validation commands, window sizes and scenarios belong in .devin/qa.toml.
+runs-on: default
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Install Tauri system dependencies and QA tools
+    run: |
+      SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
+      $SUDO apt-get update
+      $SUDO apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev \
+        libayatana-appindicator3-dev librsvg2-dev xdotool wmctrl imagemagick fonts-noto-cjk
+  - name: Install Rust
+    run: |
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+      echo 'export PATH="$HOME/.cargo/bin:$PATH"' | tee -a "$ENVRC" >> ~/.bashrc
+maintenance:
+  - name: Install dependencies and warm the build
+    run: |
+      export PATH="$HOME/.cargo/bin:$PATH"
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      cargo fetch --manifest-path src-tauri/Cargo.toml
+      npm run tauri build -- --debug --no-bundle || echo "WARN: warm build failed"
+knowledge:
+  - name: build
+    contents: npm run tauri build -- --debug --no-bundle -> src-tauri/target/debug/<app>
+  - name: test
+    contents: |
+      Frontend: npm test
+      Rust: cargo test --manifest-path src-tauri/Cargo.toml
+  - name: lint
+    contents: cargo clippy --manifest-path src-tauri/Cargo.toml && npm run lint --if-present
+  - name: run
+    contents: npm run tauri dev   (or run the debug binary directly)
+---
+runs-on: macos
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Ensure Rust (preinstalled on the image)
+    run: |
+      if ! command -v cargo > /dev/null; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+        echo 'export PATH="$HOME/.cargo/bin:$PATH"' | tee -a "$ENVRC" >> ~/.zshrc
+      fi
+maintenance:
+  - name: Install dependencies and warm the build
+    run: |
+      export PATH="$HOME/.cargo/bin:$PATH"
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      cargo fetch --manifest-path src-tauri/Cargo.toml
+      npm run tauri build -- --debug --bundles app || echo "WARN: warm build failed"
+knowledge:
+  - name: build
+    contents: npm run tauri build -- --debug --bundles app -> src-tauri/target/debug/bundle/macos/<App>.app
+  - name: test
+    contents: |
+      Frontend: npm test
+      Rust: cargo test --manifest-path src-tauri/Cargo.toml
+  - name: lint
+    contents: cargo clippy --manifest-path src-tauri/Cargo.toml && npm run lint --if-present
+  - name: run
+    contents: npm run tauri dev
+---
+runs-on: windows
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Install MSVC build tools, WebView2 and Rust
+    run: |
+      git config --global core.longpaths true
+      choco install -y visualstudio2022buildtools visualstudio2022-workload-vctools webview2-runtime rustup.install
+      echo 'export PATH="$HOME/.cargo/bin:$PATH"' | tee -a "$ENVRC" >> ~/.bashrc
+      "$HOME/.cargo/bin/rustup" default stable-msvc
+maintenance:
+  - name: Install dependencies and warm the build
+    run: |
+      export PATH="$HOME/.cargo/bin:$PATH"
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      cargo fetch --manifest-path src-tauri/Cargo.toml
+      npm run tauri build -- --debug --no-bundle || echo "WARN: warm build failed"
+knowledge:
+  - name: build
+    contents: npm run tauri build -- --debug --no-bundle -> src-tauri/target/debug/<app>.exe
+  - name: test
+    contents: |
+      Frontend: npm test
+      Rust: cargo test --manifest-path src-tauri/Cargo.toml
+  - name: lint
+    contents: cargo clippy --manifest-path src-tauri/Cargo.toml && npm run lint --if-present
+  - name: run
+    contents: npm run tauri dev

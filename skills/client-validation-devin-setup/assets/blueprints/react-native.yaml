@@ -1,0 +1,91 @@
+# Devin blueprint template: React Native (bare or Expo prebuild) for Android and iOS.
+# Copy to .devin/blueprint.yaml and adjust: Node version, Android API level, the iOS workspace and
+# scheme (MyApp), and the simulator name. Expo projects without native folders: keep the
+# `npx expo prebuild` lines; bare projects can delete them. react-native-macos / -windows need extra
+# documents (see the electron template for the Windows tooling pattern).
+# Validation commands, devices and scenarios belong in .devin/qa.toml.
+runs-on: default
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Install JDK 17
+    uses: github.com/actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
+  - name: Install Android SDK, emulator and AVDs
+    run: |
+      export ANDROID_HOME="$HOME/android-sdk"
+      mkdir -p "$ANDROID_HOME/cmdline-tools" && cd "$ANDROID_HOME/cmdline-tools"
+      curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o tools.zip
+      unzip -q tools.zip -d tmp && mv tmp/cmdline-tools latest && rm -rf tools.zip tmp
+      export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+      yes | sdkmanager --licenses > /dev/null
+      sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "emulator" "system-images;android-34;google_apis;x86_64"
+      echo no | avdmanager create avd -n devin -k "system-images;android-34;google_apis;x86_64" --device pixel_6
+      echo no | avdmanager create avd -n devin-tablet -k "system-images;android-34;google_apis;x86_64" --device pixel_tablet \
+        || echo "pixel_tablet profile unavailable; tablet AVD skipped"
+      { echo "export ANDROID_HOME=$ANDROID_HOME"
+        echo 'export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"'
+      } | tee -a "$ENVRC" >> ~/.bashrc
+maintenance:
+  - name: Install JS dependencies and warm the Android build
+    run: |
+      export ANDROID_HOME="$HOME/android-sdk"
+      export PATH="$ANDROID_HOME/platform-tools:$PATH"
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      [ -d android ] || npx expo prebuild --platform android --no-install
+      (cd android && ./gradlew --no-daemon assembleRelease) || echo "WARN: Android warm build failed"
+knowledge:
+  - name: build
+    contents: |
+      cd android && ./gradlew assembleRelease
+      -> android/app/build/outputs/apk/release/app-release.apk (JS bundled, debug-signed, no Metro needed)
+  - name: test
+    contents: npm test
+  - name: lint
+    contents: npm run lint
+  - name: run
+    contents: |
+      emulator -avd devin -no-audio -gpu swiftshader_indirect &  then  adb wait-for-device
+      adb install -r android/app/build/outputs/apk/release/app-release.apk
+      Debug with Metro instead: npx react-native start &  adb reverse tcp:8081 tcp:8081  npx react-native run-android
+---
+runs-on: macos
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Install CocoaPods and helpers
+    run: brew install cocoapods watchman xcbeautify
+maintenance:
+  - name: Install dependencies, pods, warm the iOS build, pre-boot the simulator
+    run: |
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      [ -d ios ] || npx expo prebuild --platform ios --no-install
+      (cd ios && pod install)
+      xcodebuild -workspace ios/MyApp.xcworkspace -scheme MyApp -configuration Release -sdk iphonesimulator \
+        -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath ios/build build \
+        || echo "WARN: iOS warm build failed (check workspace and scheme names)"
+      xcrun simctl boot "iPhone 17" || true
+knowledge:
+  - name: build
+    contents: |
+      xcodebuild -workspace ios/MyApp.xcworkspace -scheme MyApp -configuration Release -sdk iphonesimulator \
+        -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath ios/build build
+      -> ios/build/Build/Products/Release-iphonesimulator/MyApp.app (JS bundled, no Metro needed)
+  - name: test
+    contents: npm test
+  - name: lint
+    contents: npm run lint
+  - name: run
+    contents: |
+      open -a Simulator; xcrun simctl install booted ios/build/Build/Products/Release-iphonesimulator/MyApp.app
+      xcrun simctl launch booted <bundle-id>

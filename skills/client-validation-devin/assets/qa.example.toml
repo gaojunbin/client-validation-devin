@@ -1,0 +1,133 @@
+# .devin/qa.toml: validation spec read by the client-validation-devin CLI.
+# Everything Devin needs to know about *what* to validate lives here; *how* lives in the
+# validator protocol shipped with the skill. Keep it factual: commands that work, real screens,
+# expectations a tester can check by looking.
+schema = 1
+
+[product]
+name = "Acme Notes"
+summary = "Offline-first note-taking app built with Flutter for iOS, Android, macOS, Windows and Linux. Notes sync when online."
+# owner/name exactly as connected in Devin. Empty: derived from `git remote get-url <delivery.remote>`.
+repo = ""
+
+[delivery]
+# push:   force-push HEAD to <scratch_prefix><branch> on <remote>; Devin fetches that ref.
+# bundle: upload `git bundle` of HEAD as a session attachment (no push; no LFS or submodules).
+mode = "push"
+scratch_prefix = "client-validation-devin/"
+remote = "origin"
+
+[run]
+default_platforms = ["ios", "android", "macos", "linux"]
+max_rounds = 5            # fix rounds before escalating to a human
+timeout_minutes = 90      # per platform per round
+poll_seconds = 20
+max_parallel = 5          # sessions of one round running at once; the rest queue (match your plan's concurrency)
+reuse_sessions = true     # re-run in the platform's previous session (warm caches)
+devin_mode = ""           # "" = organization default; e.g. "normal", "fast", "lite"
+max_acu_limit = 0         # 0 = no explicit cap
+fail_on = ["blocker", "critical", "major"]
+record_video = true       # validator records the main p0 walkthrough
+download_videos = false   # videos stay in Devin unless true
+
+[release]
+command = []              # argv, run without a shell, e.g. ["./scripts/release.sh", "--channel", "beta"]; empty = stop at READY
+auto = false              # true: `client-validation-devin release` runs the command after a green HEAD
+
+[secrets]
+devin_secret_names = []   # secrets already stored in Devin (names only), e.g. ["QA_EMAIL", "QA_PASSWORD"]
+from_env = []             # local env vars sent as session-only secrets, e.g. ["QA_OTP_SEED"]
+
+[layout]
+themes = ["light", "dark"]
+locales = ["en", "de"]    # include a long-string locale to catch truncation
+text_scale = ["default", "largest"]
+checks = """
+No overlapping or clipped text. No controls off-screen, under the status bar, notch or home indicator.
+Readable contrast in both themes. Images and icons load (no blank boxes). Lists scroll to the last item.
+Dialogs and sheets fit the smallest supported screen.
+"""
+
+[platforms.ios]
+vm = "macos"
+setup = "flutter pub get"
+build = "flutter build ios --simulator --debug"
+test = "flutter test"
+app_id = "com.acme.notes"
+artifact = "build/ios/iphonesimulator/Runner.app"
+devices = ["iPhone 17", "iPhone SE (3rd generation)", "iPad Air 13-inch (M3)"]
+notes = ""
+
+[platforms.android]
+vm = "linux"
+setup = "flutter pub get"
+build = "flutter build apk --debug"
+test = "flutter test"
+app_id = "com.acme.notes"
+artifact = "build/app/outputs/flutter-apk/app-debug.apk"
+devices = ["pixel_6 api 34", "pixel_tablet api 34"]
+
+[platforms.macos]
+vm = "macos"
+setup = "flutter pub get"
+build = "flutter build macos --debug"
+artifact = "build/macos/Build/Products/Debug/Acme Notes.app"
+window_sizes = ["1440x900", "1024x700"]
+# Optional per-platform overrides of [layout] (here: the desktop app has no dark theme):
+# themes = ["light"]
+# locales = ["en"]
+# text_scale = ["default"]
+
+[platforms.linux]
+vm = "linux"
+setup = "flutter pub get"
+build = "flutter build linux --debug"
+artifact = "build/linux/x64/debug/bundle/acme_notes"
+window_sizes = ["1280x800", "800x600"]
+
+[platforms.windows]
+vm = "windows"            # or the name of your Windows Outpost
+setup = "flutter pub get"
+build = "flutter build windows --debug"
+artifact = "build/windows/x64/runner/Debug/acme_notes.exe"
+window_sizes = ["1280x800", "1024x700"]
+
+[[scenarios]]
+id = "first-launch"
+title = "First launch and onboarding"
+priority = "p0"           # p0 runs every round; p1 runs when `paths` match changed files
+platforms = []            # empty = every platform
+steps = """
+1. Clear app data, then launch the app.
+2. Swipe through the three onboarding pages and tap "Get started".
+"""
+expect = """
+Home shows the empty-state illustration and a "New note" button. No crash, no clipped text.
+"""
+
+[[scenarios]]
+id = "create-note"
+title = "Create, edit and delete a note"
+priority = "p0"
+platforms = []
+steps = """
+1. Tap "New note", type the title "Groceries" and the body "milk, eggs".
+2. Go back to the list, reopen the note, append ", bread", go back.
+3. Delete the note from the list (swipe on mobile, context menu on desktop) and confirm.
+"""
+expect = """
+The list shows "Groceries" with the updated preview after step 2 and is empty after step 3.
+"""
+
+[[scenarios]]
+id = "settings-theme"
+title = "Switch theme in Settings"
+priority = "p1"
+platforms = []
+paths = ["lib/settings/**", "lib/theme/**"]
+steps = """
+1. Open Settings and switch Theme to Dark, then to Light.
+"""
+expect = """
+The whole app re-themes immediately; every text stays readable; the toggle reflects the choice.
+"""

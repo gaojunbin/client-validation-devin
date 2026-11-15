@@ -1,0 +1,41 @@
+# Devin blueprint template: native Apple app (Swift/SwiftUI/UIKit/AppKit) for iOS and macOS.
+# Copy to .devin/blueprint.yaml and adjust: project or workspace (MyApp.xcodeproj), scheme (MyApp),
+# simulator name, and whether you generate the project (XcodeGen/Tuist) or use CocoaPods.
+# Uses the Xcode preinstalled on Devin's macOS image; never install Xcode in a blueprint.
+# Validation commands, devices and scenarios belong in .devin/qa.toml.
+runs-on: macos
+initialize:
+  - name: Install build helpers
+    run: brew install xcbeautify swiftlint xcodegen
+maintenance:
+  - name: Generate project if needed and resolve Swift packages
+    run: |
+      if [ -f project.yml ]; then xcodegen generate; fi
+      if [ -f Podfile ]; then pod install; fi
+      xcodebuild -resolvePackageDependencies -project MyApp.xcodeproj -scheme MyApp
+  - name: Warm iOS and macOS builds, pre-boot the simulator
+    run: |
+      xcodebuild -project MyApp.xcodeproj -scheme MyApp -destination 'platform=iOS Simulator,name=iPhone 17' \
+        -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build-for-testing \
+        || echo "WARN: iOS warm build failed (check project and scheme names)"
+      xcodebuild -project MyApp.xcodeproj -scheme MyApp -destination 'platform=macOS' \
+        -derivedDataPath build/dd CODE_SIGN_IDENTITY=- build \
+        || echo "WARN: macOS warm build failed (delete this line for iOS-only apps)"
+      xcrun simctl boot "iPhone 17" || true
+knowledge:
+  - name: build
+    contents: |
+      iOS:   xcodebuild -project MyApp.xcodeproj -scheme MyApp -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build
+             -> build/dd/Build/Products/Debug-iphonesimulator/MyApp.app
+      macOS: xcodebuild -project MyApp.xcodeproj -scheme MyApp -destination 'platform=macOS' -derivedDataPath build/dd CODE_SIGN_IDENTITY=- build
+             -> build/dd/Build/Products/Debug/MyApp.app
+  - name: test
+    contents: |
+      xcodebuild test -project MyApp.xcodeproj -scheme MyApp -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath build/dd -resultBundlePath build/Test.xcresult
+      xcrun xcresulttool get test-results summary --path build/Test.xcresult --format json
+  - name: lint
+    contents: swiftlint
+  - name: run
+    contents: |
+      iOS: open -a Simulator; xcrun simctl install booted build/dd/Build/Products/Debug-iphonesimulator/MyApp.app; xcrun simctl launch booted <bundle-id>
+      macOS: open -n build/dd/Build/Products/Debug/MyApp.app

@@ -1,0 +1,103 @@
+# Devin blueprint template: Kotlin / Compose Multiplatform app for Android, iOS and desktop JVM
+# (Linux, macOS, Windows), laid out like the KMP wizard (composeApp/, iosApp/).
+# Copy to .devin/blueprint.yaml and adjust: JDK version, Android API level, module name (composeApp),
+# the desktop target name (desktop), the iOS project/scheme (iosApp), and the simulator name.
+# Delete the documents for platforms the product does not ship.
+# Validation commands, devices and scenarios belong in .devin/qa.toml.
+runs-on: default
+initialize:
+  - name: Install JDK 17
+    uses: github.com/actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
+  - name: Install desktop QA tools
+    run: |
+      SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
+      $SUDO apt-get update
+      $SUDO apt-get install -y xdotool wmctrl imagemagick fonts-noto-cjk
+  - name: Install Android SDK, emulator and AVDs
+    run: |
+      export ANDROID_HOME="$HOME/android-sdk"
+      mkdir -p "$ANDROID_HOME/cmdline-tools" && cd "$ANDROID_HOME/cmdline-tools"
+      curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o tools.zip
+      unzip -q tools.zip -d tmp && mv tmp/cmdline-tools latest && rm -rf tools.zip tmp
+      export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+      yes | sdkmanager --licenses > /dev/null
+      sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "emulator" "system-images;android-34;google_apis;x86_64"
+      echo no | avdmanager create avd -n devin -k "system-images;android-34;google_apis;x86_64" --device pixel_6
+      { echo "export ANDROID_HOME=$ANDROID_HOME"
+        echo 'export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"'
+      } | tee -a "$ENVRC" >> ~/.bashrc
+maintenance:
+  - name: Download dependencies and warm Android and desktop builds
+    run: |
+      export ANDROID_HOME="$HOME/android-sdk"
+      ./gradlew --no-daemon :composeApp:assembleDebug :composeApp:compileKotlinDesktop || echo "WARN: warm build failed"
+knowledge:
+  - name: build
+    contents: |
+      Android: ./gradlew :composeApp:assembleDebug -> composeApp/build/outputs/apk/debug/composeApp-debug.apk
+      Linux desktop: ./gradlew :composeApp:createDistributable -> composeApp/build/compose/binaries/main/app/<App>/bin/<App>
+  - name: test
+    contents: ./gradlew allTests
+  - name: lint
+    contents: ./gradlew lint   (or detekt / ktlint tasks if configured)
+  - name: run
+    contents: |
+      Desktop: ./gradlew :composeApp:run
+      Android: emulator -avd devin -no-audio -gpu swiftshader_indirect &  then  adb install -r <apk>
+---
+runs-on: macos
+initialize:
+  - name: Install JDK 17
+    uses: github.com/actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
+maintenance:
+  - name: Warm the Kotlin/Native and iOS builds, pre-boot the simulator
+    run: |
+      ./gradlew --no-daemon :composeApp:compileKotlinIosSimulatorArm64 :composeApp:compileKotlinDesktop \
+        || echo "WARN: Gradle warm build failed"
+      xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -sdk iphonesimulator \
+        -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath iosApp/build CODE_SIGNING_ALLOWED=NO build \
+        || echo "WARN: iOS warm build failed (check project and scheme names)"
+      xcrun simctl boot "iPhone 17" || true
+knowledge:
+  - name: build
+    contents: |
+      iOS: xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 17' -derivedDataPath iosApp/build CODE_SIGNING_ALLOWED=NO build
+           -> iosApp/build/Build/Products/Debug-iphonesimulator/<App>.app
+      macOS desktop: ./gradlew :composeApp:createDistributable -> composeApp/build/compose/binaries/main/app/<App>.app
+  - name: test
+    contents: ./gradlew allTests
+  - name: lint
+    contents: ./gradlew lint   (or detekt / ktlint tasks if configured)
+  - name: run
+    contents: |
+      iOS: open -a Simulator; xcrun simctl install booted <App>.app; xcrun simctl launch booted <bundle-id>
+      macOS desktop: ./gradlew :composeApp:run
+---
+runs-on: windows
+initialize:
+  - name: Install JDK 17
+    uses: github.com/actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
+  - name: Allow long paths
+    run: git config --global core.longpaths true
+maintenance:
+  - name: Download dependencies and warm the desktop build
+    run: |
+      ./gradlew --no-daemon :composeApp:compileKotlinDesktop || echo "WARN: warm build failed"
+knowledge:
+  - name: build
+    contents: ./gradlew :composeApp:createDistributable -> composeApp/build/compose/binaries/main/app/<App>/<App>.exe
+  - name: test
+    contents: ./gradlew desktopTest
+  - name: lint
+    contents: ./gradlew lint   (or detekt / ktlint tasks if configured)
+  - name: run
+    contents: ./gradlew :composeApp:run

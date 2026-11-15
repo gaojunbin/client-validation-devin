@@ -1,0 +1,89 @@
+# Devin blueprint template: Electron desktop app for Linux, macOS and Windows.
+# Copy to .devin/blueprint.yaml and adjust: Node version, the package manager, and the packaging
+# command (electron-builder `--dir` shown; Electron Forge projects use `npm run package`).
+# Delete the documents for platforms the product does not ship.
+# Validation commands, window sizes and scenarios belong in .devin/qa.toml.
+runs-on: default
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Install desktop runtime libraries and QA tools
+    run: |
+      SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO=sudo
+      $SUDO apt-get update
+      $SUDO apt-get install -y libnss3 libgbm1 libgtk-3-0 libxss1 libxtst6 xdotool wmctrl imagemagick fonts-noto-cjk
+      $SUDO apt-get install -y libasound2 || $SUDO apt-get install -y libasound2t64
+maintenance:
+  - name: Install dependencies and warm the build
+    run: |
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      npm run build --if-present || echo "WARN: renderer build failed"
+knowledge:
+  - name: build
+    contents: |
+      npm run build --if-present && npx electron-builder --linux dir -> dist/linux-unpacked/<app>
+      Electron Forge: npm run package -> out/<App>-linux-x64/<app>
+  - name: test
+    contents: npm test
+  - name: lint
+    contents: npm run lint
+  - name: run
+    contents: npm start   (add --disable-gpu if the window stays black)
+---
+runs-on: macos
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+maintenance:
+  - name: Install dependencies and warm the build
+    run: |
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      npm run build --if-present || echo "WARN: renderer build failed"
+knowledge:
+  - name: build
+    contents: |
+      npm run build --if-present && npx electron-builder --mac --dir -> dist/mac-arm64/<App>.app
+      Electron Forge: npm run package -> out/<App>-darwin-arm64/<App>.app
+  - name: test
+    contents: npm test
+  - name: lint
+    contents: npm run lint
+  - name: run
+    contents: npm start
+---
+runs-on: windows
+initialize:
+  - name: Install Node.js
+    uses: github.com/actions/setup-node@v4
+    with:
+      node-version: "22"
+  - name: Native module toolchain
+    run: |
+      git config --global core.longpaths true
+      choco install -y visualstudio2022buildtools visualstudio2022-workload-vctools python3
+maintenance:
+  - name: Install dependencies and warm the build
+    run: |
+      if [ -f pnpm-lock.yaml ]; then corepack enable && pnpm install
+      elif [ -f yarn.lock ]; then corepack enable && yarn install
+      else npm install; fi
+      npm run build --if-present || echo "WARN: renderer build failed"
+knowledge:
+  - name: build
+    contents: |
+      npm run build --if-present && npx electron-builder --win dir -> dist/win-unpacked/<App>.exe
+      Electron Forge: npm run package -> out/<App>-win32-x64/<App>.exe
+  - name: test
+    contents: npm test
+  - name: lint
+    contents: npm run lint
+  - name: run
+    contents: npm start
