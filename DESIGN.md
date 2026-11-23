@@ -85,7 +85,13 @@ Credentials never live in the repo: `DEVIN_API_KEY` (a `cog_` PAT or service-use
    `refs/heads/client-validation-devin/<branch>`; **bundle** uploads `git bundle` of HEAD as an attachment
    (for repos Devin cannot pull, no LFS/submodules).
 3. Per platform: reuse the platform's previous session (send a round message) or create one with
-   `platform`, `repos`, `structured_output_schema`, tags, limits, session secrets.
+   `platform`, `repos`, `structured_output_schema`, tags, limits, session secrets. A previous session the key
+   cannot see any more (another organization after switching accounts) is replaced by a new one. Before any of
+   this, a repository with `.devin/blueprint.yaml` must have a finished batch of snapshot builds (one per VM
+   platform, at least one succeeded) in the current organization since its blueprint was created; otherwise `run`
+   exits 2 naming the next command, so no session starts on a bare VM. With bundle delivery a missing blueprint
+   is accepted (Devin may not be able to pull the repository). Secrets named in `[secrets]` that the
+   organization lacks are noted, not enforced: repository secrets cannot be listed.
 4. Persist `run.json`; return immediately (agents with command timeouts call `client-validation-devin wait`).
 
 ### 6.3 Waiting (`client-validation-devin wait --timeout N`)
@@ -96,12 +102,13 @@ Polls every `poll_seconds`. Per platform state machine:
 | `structured_output.round_token` matches and `report_status == "final"` | done (after up to 3 min of settling while the validator is still `working`, so late evidence uploads are not missed) |
 | `waiting_for_user` / `waiting_for_approval` without final report | auto-reply (max 2), then `blocked` |
 | `finished` or `suspended: inactivity` without final report | one nudge asking for the report, then `blocked` |
-| `suspended` for quota/credits/limits | `infra` (abort the run) |
+| `suspended` for quota/credits/limits (or session creation refused with a billing error) | `infra`, flagged `quota_limited`: the round needs a human |
 | `error`, or `exit` without report | `infra` |
+| session not visible to the key (HTTP 403/404/410; Devin answers 403 for another organization's session) | `infra` (a round left running under a previous key ends instead of polling forever) |
 | platform time budget exceeded | "write the report now" message, 10 min grace, then terminate → `blocked` |
 
 Exit codes: `0` all pass, `1` actionable failures, `2` blocked/infra, `3` still running,
-`4` usage/config error, `5` needs a human (max rounds or stuck issue).
+`4` usage/config error, `5` needs a human (max rounds, stuck issue, or usage limits).
 
 ### 6.4 Collect and verdict (automatic at the end of `wait`)
 Downloads the final structured output, this round's attachments (through the API attachment endpoint;

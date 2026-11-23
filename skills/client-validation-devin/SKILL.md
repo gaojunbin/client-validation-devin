@@ -68,7 +68,8 @@ returns a structured report with screenshots and logs. You own the code; validat
 | 5 | needs a human | stop and escalate (below) |
 
 ## Stop and escalate (never work around these)
-- Exit 5: an issue survived two fix rounds, `max_rounds` was reached, or Devin usage limits suspended a session.
+- Exit 5: an issue survived two fix rounds, `max_rounds` was reached, or Devin usage limits stopped a session
+  (the human waits for the quota window, adds credits, or switches accounts with `client-validation-devin login`).
 - The same blocked reason twice in a row.
 - Fixing an issue would require relaxing `.devin/qa.toml` scenarios or expectations: the spec is the contract; only
   the human changes what "correct" means.

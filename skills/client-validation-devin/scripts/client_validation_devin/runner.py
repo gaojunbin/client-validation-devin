@@ -11,7 +11,8 @@ from . import gitops
 from .api import DevinClient
 from .config import Config
 from .delivery import Delivery, deliver
-from .errors import EXIT_RUNNING, ConfigError, GitError, NeedsHumanError
+from .envcmd import environment_gap, missing_secrets
+from .errors import EXIT_RUNNING, ConfigError, GitError, InfraError, NeedsHumanError
 from .prompt import JobContext, render_prompt, round_message, select_scenarios
 from .report import finalize
 from .sessions import new_platform_state, session_body, start_platform
@@ -117,6 +118,13 @@ def start_round(
     branch = gitops.current_branch(root)
     commit = gitops.head_sha(root)
     repo = resolve_repo(config)
+    if not dry_run:
+        gap = environment_gap(client, root, repo, require_blueprint=config.delivery_mode == "push")
+        if gap:
+            raise InfraError(gap)
+        note = missing_secrets(client, config.devin_secret_names)
+        if note:
+            log(f"note: {note}")
     base = branch_dir(repo, branch)
     ledger, platforms, why, round_no = _reserve_round(config, base, commit, requested, rerun, force_round, dry_run)
     if rerun and not focus:  # fix rounds keep verifying the change the first round was about

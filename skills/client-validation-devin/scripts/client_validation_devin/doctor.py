@@ -11,6 +11,7 @@ from .api import DevinClient
 from .config import CONFIG_RELATIVE_PATH, Config, load_config
 from .credentials import load_credentials
 from .delivery import scratch_ref
+from .envcmd import environment_gap, missing_secrets
 from .errors import EXIT_BLOCKED, EXIT_OK, DevinApiError, QaError
 
 PROBE_PLATFORM = "client-validation-devin-probe-unknown-platform"
@@ -125,6 +126,8 @@ def _api(checks: Checks, config: Config | None, slug: str, probe: bool) -> None:
                                                  "app.devin.ai > Settings > Integrations and grant this repo")
         except QaError as exc:
             checks.warn("repository access", f"could not list repositories: {exc}")
+    if config:
+        _org_setup(checks, client, config, slug)
     if probe:
         try:
             detail = probe_platforms(client)
@@ -137,6 +140,16 @@ def _api(checks: Checks, config: Config | None, slug: str, probe: bool) -> None:
                 if spec.vm.lower() not in detail.lower() and spec.vm not in ("linux", "default"):
                     checks.fail(f"platform {name}", f"vm '{spec.vm}' is not offered to this organization "
                                                     "(Windows: ask Cognition for access or use a Windows Outpost)")
+
+
+def _org_setup(checks: Checks, client: DevinClient, config: Config, slug: str) -> None:
+    """What lives in the Devin organization, not the repo: the built environment and the named secrets."""
+    gap = environment_gap(client, config.root, slug, require_blueprint=config.delivery_mode == "push") if slug else ""
+    if gap:
+        checks.warn("environment", gap)
+    note = missing_secrets(client, config.devin_secret_names)
+    if note:
+        checks.warn("secrets", note)
 
 
 def run_doctor(cwd: Path, probe: bool) -> int:

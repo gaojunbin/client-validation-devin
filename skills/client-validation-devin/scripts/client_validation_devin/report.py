@@ -152,10 +152,10 @@ def _human_reasons(config: Config, run: Run, ledger: Ledger, stuck_items: list[d
     if ledger.rounds_since_green >= config.run.max_rounds:
         reasons.append(f"{ledger.rounds_since_green} rounds without a green HEAD "
                        f"(max_rounds={config.run.max_rounds})")
-    limited = [n for n, s in run.platforms.items()
-               if s["state"] == "infra" and s.get("note", "").startswith("session suspended:")]
+    limited = [n for n, s in run.platforms.items() if s.get("quota_limited")]
     if limited:
-        reasons.append(f"Devin usage limits suspended {', '.join(limited)} (wait for quota or add credits)")
+        reasons.append(f"Devin usage limits stopped {', '.join(limited)} (wait for the quota window, add credits, "
+                       "or switch to another Devin account with `client-validation-devin login`)")
     return reasons
 
 

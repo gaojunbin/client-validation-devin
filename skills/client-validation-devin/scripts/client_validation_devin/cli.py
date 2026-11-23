@@ -20,7 +20,7 @@ from .credentials import load_credentials
 from .delivery import scratch_ref
 from .doctor import run_doctor
 from .envcmd import apply_blueprint, sync_blueprint, wait_build
-from .errors import EXIT_BLOCKED, EXIT_OK, EXIT_RUNNING, EXIT_USAGE, NeedsHumanError, QaError
+from .errors import EXIT_BLOCKED, EXIT_OK, EXIT_RUNNING, EXIT_USAGE, DevinApiError, NeedsHumanError, QaError
 from .prompt import ASSETS
 from .render import render_markdown
 from .report import branch_summary, green_on
@@ -164,6 +164,18 @@ def cmd_message(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _terminate(client: DevinClient, session_id: str, *, archive: bool) -> bool:
+    """Terminate a session; False when this key cannot see it (deleted, or started under another organization)."""
+    try:
+        client.terminate_session(session_id, archive=archive)
+    except DevinApiError as exc:
+        if not exc.not_visible:
+            raise
+        print(f"session {session_id} is not visible to the current Devin key (HTTP {exc.status}); skipped")
+        return False
+    return True
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     config = _config(args)
     client = _client()
@@ -171,7 +183,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     for name, state in run.platforms.items():
         if state["state"] in ("running", "pending"):
             if state.get("session_id"):
-                client.terminate_session(state["session_id"], archive=args.archive)
+                _terminate(client, state["session_id"], archive=args.archive)
             state.update(state="blocked", note="stopped by client-validation-devin stop")
             print(f"stopped {name}")
     run.save()
@@ -214,8 +226,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     if args.sessions:
         client = _client()
         for name, entry in Ledger(base).data["platforms"].items():
-            if entry.get("session_id"):
-                client.terminate_session(entry["session_id"], archive=True)
+            if entry.get("session_id") and _terminate(client, entry["session_id"], archive=True):
                 print(f"terminated and archived {name} session {entry['session_id']}")
     if args.local and base.is_dir():
         shutil.rmtree(base)

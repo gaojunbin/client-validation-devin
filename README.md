@@ -51,6 +51,11 @@ curl -fsSL https://raw.githubusercontent.com/gaojunbin/client-validation-devin/m
    Alternatively export `DEVIN_API_KEY` (and optionally `DEVIN_ORG_ID`); the environment wins over the file.
 3. Check: `client-validation-devin available --online` in an onboarded repository, or
    `client-validation-devin doctor --probe-platforms` for the full checklist.
+4. Switching to another Devin account (for example when one runs out of quota): in the new account connect the
+   Git host, turn on Computer use and re-add the secrets your `.devin/qa.toml` files name, then run
+   `client-validation-devin login` with its key. Environments belong to a Devin organization, so the first `run`
+   in each repository stops and asks for `client-validation-devin env apply --wait` once; `doctor` lists what is
+   still missing. Earlier sessions are not reused.
 
 Never paste the key into an agent chat.
 

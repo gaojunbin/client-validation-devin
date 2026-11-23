@@ -243,6 +243,10 @@ class DevinClient:
     def list_repositories(self) -> list[dict[str, Any]]:
         return self._paginate(self.org("/repositories"))
 
+    def list_secrets(self) -> list[dict[str, Any]]:
+        """Organization and personal secrets (metadata only: `key`, `access_type`; never values)."""
+        return self._paginate(self.org("/secrets"))
+
     def list_blueprints(self) -> list[dict[str, Any]]:
         return _items(self.request("GET", self.org("/snapshot-setup/blueprints")))
 

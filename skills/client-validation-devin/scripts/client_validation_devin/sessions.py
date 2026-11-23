@@ -11,6 +11,7 @@ from .config import Config
 from .delivery import Delivery
 from .errors import ConfigError, DevinApiError
 from .prompt import report_schema
+from .waiter import usage_limit
 
 LINUX_LABELS = ("linux", "default")
 DEAD_STATUSES = ("exit", "error")
@@ -70,7 +71,7 @@ def reusable(client: DevinClient, session_id: str) -> bool:
     try:
         session = client.get_session(session_id)
     except DevinApiError as exc:
-        if exc.status in (404, 410):
+        if exc.not_visible:  # deleted, or the key now belongs to another organization: start a new session
             return False
         raise
     return session.get("status") not in DEAD_STATUSES and not session.get("is_archived")
@@ -94,6 +95,7 @@ def new_platform_state(vm: str, round_token: str) -> dict[str, Any]:
         "last_status": "",
         "last_status_detail": "",
         "acus": 0.0,
+        "quota_limited": False,
     }
 
 
@@ -119,6 +121,11 @@ def start_platform(
     except DevinApiError as exc:
         if exc.status == 429:
             state.update(state="pending", note="rate limited or at the concurrent-session cap; retrying while waiting")
+            return
+        limit = usage_limit(f"{exc.title} {exc.detail}") if exc.status in (402, 403) else ""
+        if limit:
+            state.update(state="infra", note=f"Devin refused to start the session: usage limit ({limit})",
+                         quota_limited=True)
             return
         state.update(state="infra", note=str(exc))
         return

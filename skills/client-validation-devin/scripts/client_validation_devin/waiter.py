@@ -36,6 +36,15 @@ FINALIZE = (
 )
 
 
+def usage_limit(text: str) -> str:
+    """The Devin usage limit an API error names (e.g. out_of_quota; 'billing' if it names none), or ''."""
+    lowered = text.lower()
+    named = [d for d in QUOTA_DETAILS if d != "error" and d in lowered]
+    if named:
+        return max(named, key=len)
+    return "billing" if "billing" in lowered else ""
+
+
 def has_final_report(state: dict[str, Any], session: dict[str, Any]) -> bool:
     report = session.get("structured_output") or {}
     return (
@@ -46,7 +55,8 @@ def has_final_report(state: dict[str, Any], session: dict[str, Any]) -> bool:
 
 
 def decide(state: dict[str, Any], session: dict[str, Any], now: float) -> tuple[str, str]:
-    """Return (action, note). Actions: wait, settle, done, auto_reply, nudge, finalize, terminate, blocked, infra."""
+    """Return (action, note). Actions: wait, settle, done, auto_reply, nudge, finalize, terminate, blocked, infra,
+    limited (suspended by a usage limit)."""
     status = session.get("status")
     detail = session.get("status_detail")
     if has_final_report(state, session):
@@ -55,7 +65,7 @@ def decide(state: dict[str, Any], session: dict[str, Any], now: float) -> tuple[
             return "settle", "final report received; waiting for the validator to finish attaching evidence"
         return "done", ""
     if status == "suspended" and detail in QUOTA_DETAILS:
-        return "infra", f"session suspended: {detail}"
+        return "limited", f"session suspended: {detail}"
     if status == "error":
         return "infra", "session errored"
     if status == "exit":
@@ -85,7 +95,11 @@ def step(client: DevinClient, state: dict[str, Any], now: float) -> str:
     """Poll one running platform and apply the decided action. Returns the action taken."""
     try:
         session = client.get_session(state["session_id"])
-    except (DevinApiError, InfraError) as exc:
+    except InfraError as exc:
+        if isinstance(exc, DevinApiError) and exc.not_visible:  # e.g. the key now belongs to another organization
+            state.update(state="infra", note=f"session {state['session_id']} is not visible to the current Devin key "
+                                             f"(HTTP {exc.status}): deleted, or started under another organization")
+            return "infra"
         state["note"] = f"poll failed: {exc}"
         return "wait"
     state.update(
@@ -120,6 +134,8 @@ def step(client: DevinClient, state: dict[str, Any], now: float) -> str:
         except (DevinApiError, InfraError):
             pass
         state.update(state="blocked", note=note)
+    elif action == "limited":
+        state.update(state="infra", note=note, quota_limited=True)
     elif action in ("done", "blocked", "infra"):
         state.update(state=action, note=note)
     return action

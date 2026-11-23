@@ -43,16 +43,25 @@ def make_report(token: str, round_no: int, platform: str, commit: str, outcome: 
 
 
 class FakeDevin:
-    """Behaviours per platform: pass, fail, ask (needs an auto-reply), silent (needs a nudge), quota."""
+    """Behaviours per platform: pass, fail, ask (needs an auto-reply), silent (needs a nudge), quota.
+
+    `refuse_sessions` makes session creation fail with Devin's billing error; `switch_account()` makes every
+    existing session invisible (403), as after moving to another organization's key; `build_status` is what a
+    triggered snapshot build reports."""
 
     def __init__(self, behaviours: dict[str, str] | None = None, polls_before_report: int = 2):
         self.behaviours = behaviours or {}
         self.polls_before_report = polls_before_report
+        self.refuse_sessions = False
+        self.foreign_sessions: set[str] = set()
+        self.build_status = "succeeded"
+        self.clock = 1000
         self.sessions: dict[str, dict[str, Any]] = {}
         self.files: dict[str, bytes] = {}
         self.requests: list[tuple[str, str, dict[str, str]]] = []
         self.created_bodies: list[dict[str, Any]] = []
         self.blueprints: list[dict[str, Any]] = []
+        self.secrets: list[dict[str, Any]] = []
         self.blueprint_patches = 0
         self.builds: dict[str, dict[str, Any]] = {}
         self.uploads: list[str] = []
@@ -71,6 +80,13 @@ class FakeDevin:
     def __exit__(self, *exc: Any) -> None:
         self.server.shutdown()
         self.server.server_close()
+
+    def switch_account(self) -> None:
+        self.foreign_sessions.update(self.sessions)
+
+    def tick(self) -> int:
+        self.clock += 1
+        return self.clock
 
     # ---------- behaviour ----------
 
@@ -151,6 +167,9 @@ class FakeDevin:
                     return self._send(200, {"principal_type": "user", "org_id": ORG})
                 if method == "POST" and path == f"{org}/sessions":
                     body = json.loads(self._body())
+                    if fake.refuse_sessions:
+                        return self._send(403, {"title": "Forbidden", "detail": "Your organization has a billing "
+                                                                                "error. Error: out_of_quota"})
                     if body.get("platform") not in ALLOWED_PLATFORMS:
                         return self._send(400, {"title": "Bad Request",
                                                 "detail": f"Unknown platform '{body.get('platform')}'. "
@@ -175,13 +194,17 @@ class FakeDevin:
                     return self._send(307, raw=b"", headers={"Location": f"{fake.base}/files/{name}"})
                 match = re.match(rf"^{org}/sessions/([\w-]+)(/\w+)?$", path)
                 if match:
+                    if match.group(1) in fake.foreign_sessions:  # what Devin answers for another org's session
+                        return self._send(403, {"title": "Forbidden", "detail": "Unauthorized"})
                     return self._session(method, fake.sessions.get(match.group(1)), match.group(2) or "", query)
                 if path == f"{org}/repositories":
                     return self._send(200, {"items": [{"repo_full_name": "acme/notes"}], "has_next_page": False})
+                if path == f"{org}/secrets":
+                    return self._send(200, {"items": fake.secrets, "has_next_page": False})
                 if path == f"{org}/snapshot-setup/blueprints":
                     if method == "POST":
                         item = {"blueprint_id": f"bp{len(fake.blueprints) + 1}", "source": "database",
-                                **json.loads(self._body())}
+                                "created_at": fake.tick(), **json.loads(self._body())}
                         fake.blueprints.append(item)
                         return self._send(200, item)
                     return self._send(200, {"data": fake.blueprints})  # real envelope: BlueprintList
@@ -191,8 +214,8 @@ class FakeDevin:
                     fake.blueprint_patches += 1
                     return self._send(200, target)
                 if path == f"{org}/snapshot-setup/builds" and method == "POST":
-                    fake.builds["b1"] = {"build_id": "b1", "status": "succeeded", "started_at": 100,
-                                         "completed_at": 160}
+                    fake.builds["b1"] = {"build_id": "b1", "status": fake.build_status, "created_at": fake.tick(),
+                                         "started_at": 100, "completed_at": 160}
                     rows = [{"repo_name": "acme/notes", "phase": "maintenance", "step": 0, "msg": "command: npm ci"},
                             {"repo_name": "acme/notes", "phase": "maintenance", "step": 0, "msg": "BUILD SUCCESSFUL"},
                             {"repo_name": "acme/notes", "phase": "maintenance", "step": 1,

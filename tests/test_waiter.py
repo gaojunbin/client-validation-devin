@@ -1,8 +1,10 @@
 import unittest
 
 import helpers  # noqa: F401
+from client_validation_devin.errors import DevinApiError, InfraError
 from client_validation_devin.sessions import new_platform_state
-from client_validation_devin.waiter import ACTION_COOLDOWN, MAX_AUTO_REPLIES, NUDGE_GRACE, SETTLE_SECONDS, decide
+from client_validation_devin.waiter import (ACTION_COOLDOWN, MAX_AUTO_REPLIES, NUDGE_GRACE, SETTLE_SECONDS, decide,
+                                            step, usage_limit)
 
 NOW = 10_000.0
 
@@ -60,8 +62,8 @@ class DecideTest(unittest.TestCase):
     def test_sleeping_session_is_nudged(self):
         self.assertEqual(decide(state(), session(status="suspended", detail="inactivity"), NOW)[0], "nudge")
 
-    def test_quota_is_infra(self):
-        self.assertEqual(decide(state(), session(status="suspended", detail="out_of_quota"), NOW)[0], "infra")
+    def test_quota_suspension_is_limited(self):
+        self.assertEqual(decide(state(), session(status="suspended", detail="out_of_quota"), NOW)[0], "limited")
 
     def test_exit_without_report_blocks(self):
         self.assertEqual(decide(state(), session(status="exit", detail=None), NOW)[0], "blocked")
@@ -71,6 +73,46 @@ class DecideTest(unittest.TestCase):
         graced = state(deadline=NOW - 1, grace_deadline=NOW - 1)
         self.assertEqual(decide(graced, session(), NOW)[0], "terminate")
         self.assertEqual(decide(state(deadline=NOW - 1, grace_deadline=NOW + 60), session(), NOW)[0], "wait")
+
+
+class Client:
+    """Answers get_session with a fixed session or error."""
+
+    def __init__(self, result):
+        self.result = result
+
+    def get_session(self, session_id):
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+class StepTest(unittest.TestCase):
+    def test_usage_suspension_marks_the_platform_quota_limited(self):
+        s = state()
+        self.assertEqual(step(Client(session(status="suspended", detail="out_of_quota")), s, NOW), "limited")
+        self.assertEqual((s["state"], s["quota_limited"]), ("infra", True))
+
+    def test_session_invisible_to_the_key_ends_the_platform(self):
+        s = state()
+        error = DevinApiError("GET", "/v3/organizations/org-new/sessions/devin-1", 403, "Forbidden", "Unauthorized")
+        self.assertEqual(step(Client(error), s, NOW), "infra")
+        self.assertEqual(s["state"], "infra")
+        self.assertIn("another organization", s["note"])
+
+    def test_transient_poll_failure_keeps_waiting(self):
+        s = state()
+        self.assertEqual(step(Client(InfraError("timed out")), s, NOW), "wait")
+        self.assertEqual(s["state"], "running")
+
+
+class UsageLimitTest(unittest.TestCase):
+    def test_names_the_limit_from_devin_errors(self):
+        self.assertEqual(usage_limit("Forbidden Your organization has a billing error. Error: out_of_quota"),
+                         "out_of_quota")
+        self.assertEqual(usage_limit("org_usage_limit_exceeded"), "org_usage_limit_exceeded")
+        self.assertEqual(usage_limit("Forbidden Your organization has a billing error."), "billing")
+        self.assertEqual(usage_limit("Forbidden Unauthorized"), "")
 
 
 if __name__ == "__main__":

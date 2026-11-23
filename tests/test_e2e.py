@@ -111,6 +111,36 @@ class E2E(unittest.TestCase):
             self.assertEqual(code, 5, out)
             self.assertEqual(self.latest_report()["platforms"]["ios"]["verdict"], "blocked")
 
+    def test_quota_refusal_at_session_start_needs_a_human(self):
+        with FakeDevin() as fake:
+            fake.refuse_sessions = True
+            code, out = self.cli(fake, "run", "--platforms", "ios")
+            self.assertEqual(code, 5, out)
+            self.assertIn("usage limits stopped ios", " ".join(self.latest_report()["needs_human"]))
+
+    def test_switching_accounts_starts_new_sessions(self):
+        with FakeDevin({"ios": "pass"}) as fake:
+            self.cli(fake, "run", "--platforms", "ios")
+            self.assertEqual(self.cli(fake, "wait", "--timeout", "5000")[0], 0)
+            fake.switch_account()
+            self.repo.commit_file("lib/editor/toolbar.dart", "next change")
+            code, out = self.cli(fake, "run", "--platforms", "ios")
+            self.assertEqual(code, 3, out)
+            self.assertEqual(len(fake.created_bodies), 2, "the old session is not visible: a new one is created")
+            code, out = self.cli(fake, "wait", "--timeout", "5000")
+            self.assertEqual(code, 0, out)
+
+    def test_round_left_on_another_account_ends_instead_of_waiting(self):
+        with FakeDevin({"ios": "pass"}, polls_before_report=1000) as fake:
+            self.cli(fake, "run", "--platforms", "ios")
+            fake.switch_account()
+            code, out = self.cli(fake, "wait", "--timeout", "5000")
+            self.assertEqual(code, 2, out)
+            self.assertIn("another organization", " ".join(self.latest_report()["platforms"]["ios"]["reasons"]))
+            code, out = self.cli(fake, "cleanup", "--sessions")
+            self.assertEqual(code, 0, out)
+            self.assertIn("skipped", out)
+
     def test_silent_session_is_nudged_then_reports(self):
         with FakeDevin({"ios": "silent"}) as fake:
             self.cli(fake, "run", "--platforms", "ios")

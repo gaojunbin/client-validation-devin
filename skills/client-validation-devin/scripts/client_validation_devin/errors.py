@@ -38,3 +38,8 @@ class DevinApiError(InfraError):
         self.title = title
         self.detail = detail
         super().__init__(f"Devin API {method} {path} failed: HTTP {status} {title}: {detail}".strip())
+
+    @property
+    def not_visible(self) -> bool:
+        """The object does not exist for this key: deleted, or owned by another organization (Devin answers 403)."""
+        return self.status in (403, 404, 410)
